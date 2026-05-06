@@ -1,32 +1,90 @@
 "use client";
+
 import React, { useEffect, useMemo, useState } from "react";
-import { Play, Square, Plus, Download, Trash2, Clock, FileText } from "lucide-react";
+import {
+  Play,
+  Square,
+  Plus,
+  Download,
+  Trash2,
+  Clock,
+  FileText,
+} from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 
 const DEFAULT_CLIENTS = [
-  { id: "residex-david", name: "Residex – David", rate: 125, increment: 0.1 },
-  { id: "residex-rebecca", name: "Residex – Rebecca", rate: 125, increment: 0.1 },
-  { id: "residex-implementation", name: "Residex – Implementation", rate: 125, increment: 0.1 },
-  { id: "aspen-leaf", name: "Aspen Leaf", rate: 95, increment: 0.1 },
-  { id: "other", name: "Other Client", rate: 125, increment: 0.1, editable: true },
+  {
+    id: "residex-david",
+    name: "Residex – David",
+    rate: 125,
+    increment: 0.1,
+  },
+  {
+    id: "residex-rebecca",
+    name: "Residex – Rebecca",
+    rate: 125,
+    increment: 0.1,
+  },
+  {
+    id: "residex-implementation",
+    name: "Residex – Implementation",
+    rate: 125,
+    increment: 0.1,
+  },
+  {
+    id: "aspen-leaf",
+    name: "Aspen Leaf",
+    rate: 95,
+    increment: 0.1,
+  },
+  {
+    id: "other",
+    name: "Other Client",
+    rate: 125,
+    increment: 0.1,
+    editable: true,
+  },
 ];
 
-function formatElapsed(ms) {
+function formatElapsed(ms: number) {
   const totalSeconds = Math.floor(ms / 1000);
+
   const h = String(Math.floor(totalSeconds / 3600)).padStart(2, "0");
-  const m = String(Math.floor((totalSeconds % 3600) / 60)).padStart(2, "0");
+
+  const m = String(
+    Math.floor((totalSeconds % 3600) / 60)
+  ).padStart(2, "0");
+
   const s = String(totalSeconds % 60).padStart(2, "0");
+
   return `${h}:${m}:${s}`;
 }
 
-function roundHours(milliseconds, increment) {
-  const rawHours = milliseconds / 1000 / 60 / 60;
-  return Math.ceil(rawHours / increment) * increment;
+function roundHours(
+  milliseconds: number,
+  increment: number
+) {
+  const rawHours =
+    milliseconds / 1000 / 60 / 60;
+
+  return (
+    Math.ceil(rawHours / increment) *
+    increment
+  );
 }
 
 function todayString() {
-  return new Date().toISOString().slice(0, 10);
+  return new Date()
+    .toISOString()
+    .slice(0, 10);
+}
+
+function money(value: number) {
+  return value.toLocaleString(undefined, {
+    style: "currency",
+    currency: "USD",
+  });
 }
 
 function money(value) {
