@@ -87,9 +87,6 @@ function money(value: number) {
   });
 }
 
-function money(value) {
-  return value.toLocaleString(undefined, { style: "currency", currency: "USD" });
-}
 
 export default function AnchorTimePhaseOne() {
   const [clients, setClients] = useState(DEFAULT_CLIENTS);
