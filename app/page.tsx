@@ -1,9 +1,11 @@
+
 "use client";
 
 import React, { useEffect, useMemo, useState } from "react";
 import { Play, Square, Plus, Download, Trash2, Clock, FileText } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
+import { supabase } from "@/lib/supabaseClient";
 
 type Client = {
   id: string;
@@ -60,10 +62,23 @@ function todayString() {
 }
 
 function money(value: number) {
-  return value.toLocaleString(undefined, {
-    style: "currency",
-    currency: "USD",
-  });
+  return value.toLocaleString(undefined, { style: "currency", currency: "USD" });
+}
+
+function mapSupabaseEntry(row: any): Entry {
+  return {
+    id: row.id,
+    date: row.created_at ? row.created_at.slice(0, 10) : todayString(),
+    clientId: row.client_id || "",
+    clientName: row.client_name || "Unknown Client",
+    activity: row.activity || "",
+    elapsed: 0,
+    hours: Number(row.hours || 0),
+    rate: row.hours ? Number(row.amount || 0) / Number(row.hours || 1) : 0,
+    billable: row.billable ?? true,
+    notes: row.notes || "",
+    amount: Number(row.amount || 0),
+  };
 }
 
 export default function AnchorTimePhaseOne() {
@@ -75,6 +90,7 @@ export default function AnchorTimePhaseOne() {
   const [stopDraft, setStopDraft] = useState<Entry | null>(null);
   const [manualOpen, setManualOpen] = useState(false);
   const [entries, setEntries] = useState<Entry[]>([]);
+  const [saveError, setSaveError] = useState("");
   const [manual, setManual] = useState({
     date: todayString(),
     activity: "Computer Work",
@@ -88,18 +104,33 @@ export default function AnchorTimePhaseOne() {
     return () => clearInterval(interval);
   }, []);
 
-  const activeClient = clients.find((c) => c.id === activeClientId) || clients[0];
+  useEffect(() => {
+    loadEntries();
+  }, []);
 
+  async function loadEntries() {
+    const { data, error } = await supabase
+      .from("time_entries")
+      .select("*")
+      .order("created_at", { ascending: false });
+
+    if (error) {
+      console.error(error);
+      setSaveError(error.message);
+      return;
+    }
+
+    setEntries((data || []).map(mapSupabaseEntry));
+  }
+
+  const activeClient = clients.find((c) => c.id === activeClientId) || clients[0];
   const displayClientName =
     activeClient.id === "other" && otherClientName.trim()
       ? otherClientName.trim()
       : activeClient.name;
 
   const runningMs = activeTimer ? now - activeTimer.startedAt : 0;
-
-  const roundedHours = activeTimer
-    ? roundHours(runningMs, activeClient.increment)
-    : 0;
+  const roundedHours = activeTimer ? roundHours(runningMs, activeClient.increment) : 0;
 
   const totals = useMemo(() => {
     const hours = entries.reduce((sum, e) => sum + Number(e.hours || 0), 0);
@@ -115,7 +146,7 @@ export default function AnchorTimePhaseOne() {
 
   function startTimer(activity: string) {
     if (activeTimer) return;
-
+    setSaveError("");
     setActiveTimer({
       clientId: activeClientId,
       clientName: displayClientName,
@@ -148,53 +179,102 @@ export default function AnchorTimePhaseOne() {
     setActiveTimer(null);
   }
 
-  function saveStopDraft() {
+  async function saveEntryToSupabase(entry: Entry) {
+    const startTime = entry.elapsed
+      ? new Date(Date.now() - entry.elapsed).toISOString()
+      : null;
+
+    const endTime = new Date().toISOString();
+
+    const { data, error } = await supabase
+      .from("time_entries")
+      .insert([
+        {
+          client_name: entry.clientName,
+          activity: entry.activity,
+          start_time: startTime,
+          end_time: endTime,
+          hours: entry.hours,
+          notes: entry.notes,
+          billable: entry.billable,
+          amount: entry.amount,
+        },
+      ])
+      .select("*")
+      .single();
+
+    if (error) {
+      console.error(error);
+      setSaveError(error.message);
+      return null;
+    }
+
+    return data ? mapSupabaseEntry(data) : entry;
+  }
+
+  async function saveStopDraft() {
     if (!stopDraft) return;
+
+    setSaveError("");
 
     const amount = stopDraft.billable
       ? Number(stopDraft.hours) * Number(stopDraft.rate)
       : 0;
 
-    setEntries((prev) => [{ ...stopDraft, amount }, ...prev]);
+    const newEntry = { ...stopDraft, amount };
+    const savedEntry = await saveEntryToSupabase(newEntry);
+
+    if (!savedEntry) return;
+
+    setEntries((prev) => [savedEntry, ...prev]);
     setStopDraft(null);
   }
 
-  function saveManualEntry() {
+  async function saveManualEntry() {
+    setSaveError("");
+
     const hours = Number(manual.hours || 0);
     const rate = Number(activeClient.rate || 0);
     const amount = manual.billable ? hours * rate : 0;
 
-    setEntries((prev) => [
-      {
-        id: crypto.randomUUID(),
-        date: manual.date || todayString(),
-        clientId: activeClientId,
-        clientName: displayClientName,
-        activity: manual.activity,
-        elapsed: hours * 60 * 60 * 1000,
-        hours,
-        rate,
-        billable: manual.billable,
-        notes: manual.notes,
-        amount,
-      },
-      ...prev,
-    ]);
+    const newEntry: Entry = {
+      id: crypto.randomUUID(),
+      date: manual.date || todayString(),
+      clientId: activeClientId,
+      clientName: displayClientName,
+      activity: manual.activity,
+      elapsed: hours * 60 * 60 * 1000,
+      hours,
+      rate,
+      billable: manual.billable,
+      notes: manual.notes,
+      amount,
+    };
 
-    setManual({
-      date: todayString(),
-      activity: "Computer Work",
-      hours: "0.1",
-      notes: "",
-      billable: true,
-    });
+    const savedEntry = await saveEntryToSupabase(newEntry);
 
+    if (!savedEntry) return;
+
+    setEntries((prev) => [savedEntry, ...prev]);
+    setManual({ date: todayString(), activity: "Computer Work", hours: "0.1", notes: "", billable: true });
     setManualOpen(false);
+  }
+
+  async function deleteEntry(entryId: string) {
+    setSaveError("");
+    const { error } = await supabase.from("time_entries").delete().eq("id", entryId);
+
+    if (error) {
+      console.error(error);
+      setSaveError(error.message);
+      return;
+    }
+
+    setEntries((prev) => prev.filter((e) => e.id !== entryId));
   }
 
   function exportCSV() {
     const header = ["Date", "Client", "Activity", "Hours", "Rate", "Billable", "Amount", "Notes"];
-
     const rows = entries.map((e) => [
       e.date,
       e.clientName,
@@ -207,19 +287,15 @@ export default function AnchorTimePhaseOne() {
     ]);
 
     const csv = [header, ...rows]
-      .map((row) =>
-        row.map((cell) => `"${String(cell).replaceAll('"', '""')}"`).join(",")
-      )
+      .map((row) => row.map((cell) => `"${String(cell).replaceAll('"', '""')}"`).join(","))
       .join("\n");
 
     const blob = new Blob([csv], { type: "text/csv" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
-
     a.href = url;
     a.download = "anchortime-billing-log.csv";
     a.click();
-
     URL.revokeObjectURL(url);
   }
 
@@ -229,21 +305,23 @@ export default function AnchorTimePhaseOne() {
         <div className="flex flex-col gap-2 md:flex-row md:items-end md:justify-between">
           <div>
             <h1 className="text-3xl font-bold tracking-tight">AnchorTime</h1>
-            <p className="text-slate-600">
-              Billing timer for calls, computer work, notes, rates, and export.
-            </p>
+            <p className="text-slate-600">Billing timer for calls, computer work, notes, rates, and export.</p>
           </div>
-
           <div className="flex gap-2">
             <Button variant="outline" onClick={() => setManualOpen(true)} className="rounded-2xl">
               <Plus className="mr-2 h-4 w-4" /> Manual Entry
             </Button>
-
             <Button onClick={exportCSV} className="rounded-2xl" disabled={!entries.length}>
               <Download className="mr-2 h-4 w-4" /> Export CSV
             </Button>
           </div>
         </div>
+
+        {saveError && (
+          <div className="rounded-2xl border border-red-200 bg-red-50 p-3 text-sm text-red-700">
+            Supabase error: {saveError}
+          </div>
+        )}
 
         <div className="flex flex-wrap gap-2">
           {clients.map((client) => (
@@ -310,16 +388,11 @@ export default function AnchorTimePhaseOne() {
               </div>
 
               <div className="rounded-3xl bg-white p-5 shadow-inner">
-                <div className="mb-4 flex items-center justify-between">
+                <div className="mb-4 flex items-center justify-between gap-4">
                   <div>
-                    <p className="text-sm font-medium uppercase tracking-wide text-slate-500">
-                      Current Timer
-                    </p>
-                    <h2 className="text-2xl font-bold">
-                      {activeTimer ? activeTimer.activity : "No timer running"}
-                    </h2>
+                    <p className="text-sm font-medium uppercase tracking-wide text-slate-500">Current Timer</p>
+                    <h2 className="text-2xl font-bold">{activeTimer ? activeTimer.activity : "No timer running"}</h2>
                   </div>
-
                   <div className="text-right">
                     <div className="font-mono text-4xl font-bold">
                       {activeTimer ? formatElapsed(runningMs) : "00:00:00"}
@@ -331,29 +404,15 @@ export default function AnchorTimePhaseOne() {
                 </div>
 
                 <div className="grid gap-3 md:grid-cols-2">
-                  <Button
-                    disabled={!!activeTimer}
-                    onClick={() => startTimer("Phone Call")}
-                    className="h-20 rounded-3xl text-lg"
-                  >
+                  <Button disabled={!!activeTimer} onClick={() => startTimer("Phone Call")} className="h-20 rounded-3xl text-lg">
                     <Play className="mr-2 h-5 w-5" /> Start Phone Call
                   </Button>
-
-                  <Button
-                    disabled={!!activeTimer}
-                    onClick={() => startTimer("Computer Work")}
-                    className="h-20 rounded-3xl text-lg"
-                  >
+                  <Button disabled={!!activeTimer} onClick={() => startTimer("Computer Work")} className="h-20 rounded-3xl text-lg">
                     <Play className="mr-2 h-5 w-5" /> Start Computer Work
                   </Button>
                 </div>
 
-                <Button
-                  disabled={!activeTimer}
-                  variant="destructive"
-                  onClick={stopTimer}
-                  className="mt-3 h-14 w-full rounded-3xl text-lg"
-                >
+                <Button disabled={!activeTimer} variant="destructive" onClick={stopTimer} className="mt-3 h-14 w-full rounded-3xl text-lg">
                   <Square className="mr-2 h-5 w-5" /> End Timer & Add Note
                 </Button>
               </div>
@@ -372,7 +431,6 @@ export default function AnchorTimePhaseOne() {
                 </div>
               </CardContent>
             </Card>
-
             <Card className="rounded-3xl shadow-sm">
               <CardContent className="p-5">
                 <div className="flex items-center gap-3">
@@ -389,8 +447,10 @@ export default function AnchorTimePhaseOne() {
 
         <Card className="rounded-3xl shadow-sm">
           <CardContent className="p-5">
-            <h2 className="mb-4 text-xl font-bold">Billing Log</h2>
-
+            <div className="mb-4 flex items-center justify-between">
+              <h2 className="text-xl font-bold">Billing Log</h2>
+              <p className="text-sm text-slate-500">Newest entries first</p>
+            </div>
             <div className="overflow-x-auto">
               <table className="w-full min-w-[850px] text-left text-sm">
                 <thead>
@@ -405,13 +465,10 @@ export default function AnchorTimePhaseOne() {
                     <th></th>
                   </tr>
                 </thead>
-
                 <tbody>
                   {entries.length === 0 ? (
                     <tr>
-                      <td colSpan={8} className="py-8 text-center text-slate-500">
-                        No entries yet.
-                      </td>
+                      <td colSpan={8} className="py-8 text-center text-slate-500">No entries yet.</td>
                     </tr>
                   ) : (
                     entries.map((entry) => (
@@ -424,12 +481,7 @@ export default function AnchorTimePhaseOne() {
                         <td>{money(entry.amount)}</td>
                         <td className="max-w-sm">{entry.notes}</td>
                         <td>
-                          <button
-                            onClick={() =>
-                              setEntries((prev) => prev.filter((e) => e.id !== entry.id))
-                            }
-                            className="text-slate-400 hover:text-red-600"
-                          >
+                          <button onClick={() => deleteEntry(entry.id)} className="text-slate-400 hover:text-red-600">
                             <Trash2 className="h-4 w-4" />
                           </button>
                         </td>
@@ -450,15 +502,16 @@ export default function AnchorTimePhaseOne() {
             <p className="mb-4 text-slate-600">
               {stopDraft.clientName} • {stopDraft.activity} • {stopDraft.hours.toFixed(2)} hrs
             </p>
-
-            <textarea
-              className="h-28 w-full rounded-2xl border p-3"
-              placeholder="Add note"
-              value={stopDraft.notes}
-              onChange={(e) => setStopDraft({ ...stopDraft, notes: e.target.value })}
-            />
-
-            <label className="my-4 flex items-center gap-2 text-sm">
+            <label className="mb-3 block space-y-1">
+              <span className="text-sm font-medium text-slate-600">End Note</span>
+              <textarea
+                className="h-28 w-full rounded-2xl border p-3"
+                placeholder="Example: Phone call with David about implementation next steps."
+                value={stopDraft.notes}
+                onChange={(e) => setStopDraft({ ...stopDraft, notes: e.target.value })}
+              />
+            </label>
+            <label className="mb-4 flex items-center gap-2 text-sm">
               <input
                 type="checkbox"
                 checked={stopDraft.billable}
@@ -466,14 +519,9 @@ export default function AnchorTimePhaseOne() {
               />
               Billable
             </label>
-
             <div className="flex justify-end gap-2">
-              <Button variant="outline" onClick={() => setStopDraft(null)} className="rounded-2xl">
-                Cancel
-              </Button>
-              <Button onClick={saveStopDraft} className="rounded-2xl">
-                Save Entry
-              </Button>
+              <Button variant="outline" onClick={() => setStopDraft(null)} className="rounded-2xl">Cancel</Button>
+              <Button onClick={saveStopDraft} className="rounded-2xl">Save Entry</Button>
             </div>
           </div>
         </div>
@@ -483,38 +531,46 @@ export default function AnchorTimePhaseOne() {
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
           <div className="w-full max-w-lg rounded-3xl bg-white p-6 shadow-xl">
             <h2 className="mb-4 text-2xl font-bold">Manual Time Entry</h2>
-
-            <input
-              type="date"
-              className="mb-3 w-full rounded-2xl border p-3"
-              value={manual.date}
-              onChange={(e) => setManual({ ...manual, date: e.target.value })}
-            />
-
-            <input
-              type="number"
-              step="0.1"
-              className="mb-3 w-full rounded-2xl border p-3"
-              value={manual.hours}
-              onChange={(e) => setManual({ ...manual, hours: e.target.value })}
-            />
-
-            <select
-              className="mb-3 w-full rounded-2xl border p-3"
-              value={manual.activity}
-              onChange={(e) => setManual({ ...manual, activity: e.target.value })}
-            >
-              <option>Phone Call</option>
-              <option>Computer Work</option>
-            </select>
-
-            <textarea
-              className="h-24 w-full rounded-2xl border p-3"
-              placeholder="Notes"
-              value={manual.notes}
-              onChange={(e) => setManual({ ...manual, notes: e.target.value })}
-            />
-
+            <div className="grid gap-3 md:grid-cols-2">
+              <label className="space-y-1">
+                <span className="text-sm font-medium text-slate-600">Date</span>
+                <input
+                  type="date"
+                  className="w-full rounded-2xl border p-3"
+                  value={manual.date}
+                  onChange={(e) => setManual({ ...manual, date: e.target.value })}
+                />
+              </label>
+              <label className="space-y-1">
+                <span className="text-sm font-medium text-slate-600">Hours</span>
+                <input
+                  type="number"
+                  step="0.1"
+                  className="w-full rounded-2xl border p-3"
+                  value={manual.hours}
+                  onChange={(e) => setManual({ ...manual, hours: e.target.value })}
+                />
+              </label>
+            </div>
+            <label className="mt-3 block space-y-1">
+              <span className="text-sm font-medium text-slate-600">Activity</span>
+              <select
+                className="w-full rounded-2xl border p-3"
+                value={manual.activity}
+                onChange={(e) => setManual({ ...manual, activity: e.target.value })}
+              >
+                <option>Phone Call</option>
+                <option>Computer Work</option>
+              </select>
+            </label>
+            <label className="mt-3 block space-y-1">
+              <span className="text-sm font-medium text-slate-600">Notes</span>
+              <textarea
+                className="h-24 w-full rounded-2xl border p-3"
+                value={manual.notes}
+                onChange={(e) => setManual({ ...manual, notes: e.target.value })}
+              />
+            </label>
             <label className="my-4 flex items-center gap-2 text-sm">
               <input
                 type="checkbox"
@@ -523,14 +579,9 @@ export default function AnchorTimePhaseOne() {
               />
               Billable
             </label>
-
             <div className="flex justify-end gap-2">
-              <Button variant="outline" onClick={() => setManualOpen(false)} className="rounded-2xl">
-                Cancel
-              </Button>
-              <Button onClick={saveManualEntry} className="rounded-2xl">
-                Save Manual Entry
-              </Button>
+              <Button variant="outline" onClick={() => setManualOpen(false)} className="rounded-2xl">Cancel</Button>
+              <Button onClick={saveManualEntry} className="rounded-2xl">Save Manual Entry</Button>
             </div>
           </div>
         </div>
