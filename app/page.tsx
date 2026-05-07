@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useEffect, useMemo, useState } from "react";
-import { Play, Square, Plus, Download, Trash2, Clock, FileText, Printer } from "lucide-react";
+import { Play, Square, Plus, Download, Trash2, Clock, FileText, Printer, UserPlus } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { supabase } from "@/lib/supabaseClient";
@@ -89,6 +89,7 @@ export default function AnchorTimePhaseOne() {
   const [stopDraft, setStopDraft] = useState<Entry | null>(null);
   const [manualOpen, setManualOpen] = useState(false);
   const [invoiceOpen, setInvoiceOpen] = useState(false);
+  const [clientManagerOpen, setClientManagerOpen] = useState(false);
   const [entries, setEntries] = useState<Entry[]>([]);
   const [saveError, setSaveError] = useState("");
   const [manual, setManual] = useState({
@@ -97,6 +98,11 @@ export default function AnchorTimePhaseOne() {
     hours: "0.1",
     notes: "",
     billable: true,
+  });
+  const [newClient, setNewClient] = useState({
+    name: "",
+    rate: "125",
+    increment: "0.1",
   });
   const [invoiceFilters, setInvoiceFilters] = useState({
     clientName: "All Clients",
@@ -113,6 +119,7 @@ export default function AnchorTimePhaseOne() {
 
   useEffect(() => {
     loadEntries();
+    loadClients();
   }, []);
 
   async function loadEntries() {
@@ -130,6 +137,90 @@ export default function AnchorTimePhaseOne() {
     setEntries((data || []).map(mapSupabaseEntry));
   }
 
+  async function loadClients() {
+    const { data, error } = await supabase
+      .from("clients")
+      .select("*")
+      .order("name", { ascending: true });
+
+    if (error) {
+      console.error(error);
+      return;
+    }
+
+    const savedClients: Client[] = (data || []).map((client: any) => ({
+      id: client.id,
+      name: client.name,
+      rate: Number(client.hourly_rate || 0),
+      increment: Number(client.billing_increment || 0.1),
+    }));
+
+    const savedNames = new Set(savedClients.map((client) => client.name));
+    const defaultsNotDuplicated = DEFAULT_CLIENTS.filter((client) => !savedNames.has(client.name));
+    setClients([...defaultsNotDuplicated, ...savedClients]);
+  }
+
+  async function addClient() {
+    setSaveError("");
+
+    const name = newClient.name.trim();
+    if (!name) {
+      setSaveError("Please enter a client name.");
+      return;
+    }
+
+    const rate = Number(newClient.rate || 0);
+    const increment = Number(newClient.increment || 0.1);
+
+    const { data, error } = await supabase
+      .from("clients")
+      .insert([
+        {
+          name,
+          hourly_rate: rate,
+          billing_increment: increment,
+        },
+      ])
+      .select("*")
+      .single();
+
+    if (error) {
+      console.error(error);
+      setSaveError(error.message);
+      return;
+    }
+
+    const savedClient: Client = {
+      id: data.id,
+      name: data.name,
+      rate: Number(data.hourly_rate || rate),
+      increment: Number(data.billing_increment || increment),
+    };
+
+    setClients((prev) => [...prev, savedClient]);
+    setActiveClientId(savedClient.id);
+    setNewClient({ name: "", rate: "125", increment: "0.1" });
+  }
+
+  async function deleteClient(clientId: string) {
+    const defaultClient = DEFAULT_CLIENTS.find((client) => client.id === clientId);
+    if (defaultClient) {
+      setSaveError("Default clients cannot be deleted yet.");
+      return;
+    }
+
+    const { error } = await supabase.from("clients").delete().eq("id", clientId);
+
+    if (error) {
+      console.error(error);
+      setSaveError(error.message);
+      return;
+    }
+
+    setClients((prev) => prev.filter((client) => client.id !== clientId));
+    if (activeClientId === clientId) setActiveClientId(DEFAULT_CLIENTS[0].id);
+  }
+
   const activeClient = clients.find((c) => c.id === activeClientId) || clients[0];
   const displayClientName =
     activeClient.id === "other" && otherClientName.trim()
@@ -142,7 +233,7 @@ export default function AnchorTimePhaseOne() {
   const clientNames = useMemo(() => {
     const names = new Set<string>();
     entries.forEach((entry) => names.add(entry.clientName));
-    DEFAULT_CLIENTS.forEach((client) => names.add(client.name));
+    clients.forEach((client) => names.add(client.name));
     return ["All Clients", ...Array.from(names).filter(Boolean).sort()];
   }, [entries]);
 
@@ -348,6 +439,9 @@ export default function AnchorTimePhaseOne() {
             <p className="text-slate-600">Billing timer for calls, computer work, notes, rates, invoices, and export.</p>
           </div>
           <div className="flex flex-wrap gap-2">
+            <Button variant="outline" onClick={() => setClientManagerOpen(true)} className="rounded-2xl">
+              <UserPlus className="mr-2 h-4 w-4" /> Clients
+            </Button>
             <Button variant="outline" onClick={() => setInvoiceOpen(true)} className="rounded-2xl">
               <FileText className="mr-2 h-4 w-4" /> Invoice
             </Button>
@@ -537,6 +631,93 @@ export default function AnchorTimePhaseOne() {
           </CardContent>
         </Card>
       </div>
+
+      {clientManagerOpen && (
+        <div className="fixed inset-0 z-50 overflow-y-auto bg-black/40 p-4 no-print">
+          <div className="mx-auto my-6 max-w-3xl rounded-3xl bg-white p-6 shadow-xl">
+            <div className="mb-4 flex items-center justify-between gap-3">
+              <div>
+                <h2 className="text-2xl font-bold">Client Manager</h2>
+                <p className="text-slate-600">Add clients, rates, and billing increments. New clients become tabs.</p>
+              </div>
+              <Button variant="outline" onClick={() => setClientManagerOpen(false)} className="rounded-2xl">Close</Button>
+            </div>
+
+            <div className="mb-5 grid gap-3 md:grid-cols-4">
+              <label className="space-y-1 md:col-span-2">
+                <span className="text-sm font-medium text-slate-600">Client Name</span>
+                <input
+                  className="w-full rounded-2xl border p-3"
+                  placeholder="Example: Residex - Training"
+                  value={newClient.name}
+                  onChange={(e) => setNewClient({ ...newClient, name: e.target.value })}
+                />
+              </label>
+              <label className="space-y-1">
+                <span className="text-sm font-medium text-slate-600">Hourly Rate</span>
+                <input
+                  type="number"
+                  className="w-full rounded-2xl border p-3"
+                  value={newClient.rate}
+                  onChange={(e) => setNewClient({ ...newClient, rate: e.target.value })}
+                />
+              </label>
+              <label className="space-y-1">
+                <span className="text-sm font-medium text-slate-600">Increment</span>
+                <select
+                  className="w-full rounded-2xl border p-3"
+                  value={newClient.increment}
+                  onChange={(e) => setNewClient({ ...newClient, increment: e.target.value })}
+                >
+                  <option value="0.1">6 minutes</option>
+                  <option value="0.25">15 minutes</option>
+                  <option value="0.5">30 minutes</option>
+                  <option value={String(1 / 60)}>Exact minutes</option>
+                </select>
+              </label>
+            </div>
+
+            <Button onClick={addClient} className="mb-6 rounded-2xl">
+              <Plus className="mr-2 h-4 w-4" /> Add Client
+            </Button>
+
+            <div className="overflow-x-auto rounded-2xl border">
+              <table className="w-full text-left text-sm">
+                <thead>
+                  <tr className="border-b bg-slate-50 text-slate-500">
+                    <th className="p-3">Client</th>
+                    <th className="p-3">Rate</th>
+                    <th className="p-3">Increment</th>
+                    <th className="p-3 text-right">Action</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {clients.map((client) => {
+                    const isDefault = !!DEFAULT_CLIENTS.find((defaultClient) => defaultClient.id === client.id);
+                    return (
+                      <tr key={client.id} className="border-b align-top">
+                        <td className="p-3 font-medium">{client.name}</td>
+                        <td className="p-3">{money(client.rate)}</td>
+                        <td className="p-3">{client.increment === 0.1 ? "6 minutes" : `${client.increment} hr`}</td>
+                        <td className="p-3 text-right">
+                          <Button
+                            variant="outline"
+                            className="rounded-2xl"
+                            disabled={isDefault}
+                            onClick={() => deleteClient(client.id)}
+                          >
+                            Delete
+                          </Button>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      )}
 
       {invoiceOpen && (
         <div className="fixed inset-0 z-50 overflow-y-auto bg-black/40 p-4 no-print">
