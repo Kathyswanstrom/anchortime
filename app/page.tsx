@@ -1,8 +1,7 @@
-
 "use client";
 
 import React, { useEffect, useMemo, useState } from "react";
-import { Play, Square, Plus, Download, Trash2, Clock, FileText } from "lucide-react";
+import { Play, Square, Plus, Download, Trash2, Clock, FileText, Printer } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { supabase } from "@/lib/supabaseClient";
@@ -89,6 +88,7 @@ export default function AnchorTimePhaseOne() {
   const [now, setNow] = useState(Date.now());
   const [stopDraft, setStopDraft] = useState<Entry | null>(null);
   const [manualOpen, setManualOpen] = useState(false);
+  const [invoiceOpen, setInvoiceOpen] = useState(false);
   const [entries, setEntries] = useState<Entry[]>([]);
   const [saveError, setSaveError] = useState("");
   const [manual, setManual] = useState({
@@ -97,6 +97,12 @@ export default function AnchorTimePhaseOne() {
     hours: "0.1",
     notes: "",
     billable: true,
+  });
+  const [invoiceFilters, setInvoiceFilters] = useState({
+    clientName: "All Clients",
+    startDate: "",
+    endDate: "",
+    invoiceNumber: `INV-${todayString().replaceAll("-", "")}`,
   });
 
   useEffect(() => {
@@ -132,11 +138,34 @@ export default function AnchorTimePhaseOne() {
   const runningMs = activeTimer ? now - activeTimer.startedAt : 0;
   const roundedHours = activeTimer ? roundHours(runningMs, activeClient.increment) : 0;
 
+  const clientNames = useMemo(() => {
+    const names = new Set<string>();
+    entries.forEach((entry) => names.add(entry.clientName));
+    DEFAULT_CLIENTS.forEach((client) => names.add(client.name));
+    return ["All Clients", ...Array.from(names).filter(Boolean).sort()];
+  }, [entries]);
+
   const totals = useMemo(() => {
     const hours = entries.reduce((sum, e) => sum + Number(e.hours || 0), 0);
     const amount = entries.reduce((sum, e) => sum + Number(e.amount || 0), 0);
     return { hours, amount };
   }, [entries]);
+
+  const invoiceEntries = useMemo(() => {
+    return entries.filter((entry) => {
+      const clientMatch =
+        invoiceFilters.clientName === "All Clients" || entry.clientName === invoiceFilters.clientName;
+      const startMatch = !invoiceFilters.startDate || entry.date >= invoiceFilters.startDate;
+      const endMatch = !invoiceFilters.endDate || entry.date <= invoiceFilters.endDate;
+      return clientMatch && startMatch && endMatch && entry.billable;
+    });
+  }, [entries, invoiceFilters]);
+
+  const invoiceTotals = useMemo(() => {
+    const hours = invoiceEntries.reduce((sum, e) => sum + Number(e.hours || 0), 0);
+    const amount = invoiceEntries.reduce((sum, e) => sum + Number(e.amount || 0), 0);
+    return { hours, amount };
+  }, [invoiceEntries]);
 
   function updateClient(field: "rate" | "increment", value: number) {
     setClients((prev) =>
@@ -180,10 +209,7 @@ export default function AnchorTimePhaseOne() {
   }
 
   async function saveEntryToSupabase(entry: Entry) {
-    const startTime = entry.elapsed
-      ? new Date(Date.now() - entry.elapsed).toISOString()
-      : null;
-
+    const startTime = entry.elapsed ? new Date(Date.now() - entry.elapsed).toISOString() : null;
     const endTime = new Date().toISOString();
 
     const { data, error } = await supabase
@@ -299,15 +325,31 @@ export default function AnchorTimePhaseOne() {
     URL.revokeObjectURL(url);
   }
 
+  function printInvoice() {
+    window.print();
+  }
+
   return (
     <div className="min-h-screen bg-slate-50 p-4 md:p-8 text-slate-900">
-      <div className="mx-auto max-w-6xl space-y-5">
+      <style>{`
+        @media print {
+          body * { visibility: hidden; }
+          #invoice-print-area, #invoice-print-area * { visibility: visible; }
+          #invoice-print-area { position: absolute; left: 0; top: 0; width: 100%; padding: 24px; }
+          .no-print { display: none !important; }
+        }
+      `}</style>
+
+      <div className="mx-auto max-w-6xl space-y-5 no-print">
         <div className="flex flex-col gap-2 md:flex-row md:items-end md:justify-between">
           <div>
             <h1 className="text-3xl font-bold tracking-tight">AnchorTime</h1>
-            <p className="text-slate-600">Billing timer for calls, computer work, notes, rates, and export.</p>
+            <p className="text-slate-600">Billing timer for calls, computer work, notes, rates, invoices, and export.</p>
           </div>
-          <div className="flex gap-2">
+          <div className="flex flex-wrap gap-2">
+            <Button variant="outline" onClick={() => setInvoiceOpen(true)} className="rounded-2xl">
+              <FileText className="mr-2 h-4 w-4" /> Invoice
+            </Button>
             <Button variant="outline" onClick={() => setManualOpen(true)} className="rounded-2xl">
               <Plus className="mr-2 h-4 w-4" /> Manual Entry
             </Button>
@@ -495,8 +537,88 @@ export default function AnchorTimePhaseOne() {
         </Card>
       </div>
 
+      {invoiceOpen && (
+        <div className="fixed inset-0 z-50 overflow-y-auto bg-black/40 p-4 no-print">
+          <div className="mx-auto my-6 max-w-5xl rounded-3xl bg-white p-6 shadow-xl">
+            <div className="mb-4 flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
+              <div>
+                <h2 className="text-2xl font-bold">Invoice Generator</h2>
+                <p className="text-slate-600">Filter your billable entries, then print or save as PDF.</p>
+              </div>
+              <div className="flex gap-2">
+                <Button variant="outline" onClick={() => setInvoiceOpen(false)} className="rounded-2xl">Close</Button>
+                <Button onClick={printInvoice} className="rounded-2xl">
+                  <Printer className="mr-2 h-4 w-4" /> Print / Save PDF
+                </Button>
+              </div>
+            </div>
+
+            <div className="mb-5 grid gap-3 md:grid-cols-4">
+              <label className="space-y-1">
+                <span className="text-sm font-medium text-slate-600">Client</span>
+                <select
+                  className="w-full rounded-2xl border p-3"
+                  value={invoiceFilters.clientName}
+                  onChange={(e) => setInvoiceFilters({ ...invoiceFilters, clientName: e.target.value })}
+                >
+                  {clientNames.map((name) => (
+                    <option key={name}>{name}</option>
+                  ))}
+                </select>
+              </label>
+              <label className="space-y-1">
+                <span className="text-sm font-medium text-slate-600">Start Date</span>
+                <input
+                  type="date"
+                  className="w-full rounded-2xl border p-3"
+                  value={invoiceFilters.startDate}
+                  onChange={(e) => setInvoiceFilters({ ...invoiceFilters, startDate: e.target.value })}
+                />
+              </label>
+              <label className="space-y-1">
+                <span className="text-sm font-medium text-slate-600">End Date</span>
+                <input
+                  type="date"
+                  className="w-full rounded-2xl border p-3"
+                  value={invoiceFilters.endDate}
+                  onChange={(e) => setInvoiceFilters({ ...invoiceFilters, endDate: e.target.value })}
+                />
+              </label>
+              <label className="space-y-1">
+                <span className="text-sm font-medium text-slate-600">Invoice #</span>
+                <input
+                  className="w-full rounded-2xl border p-3"
+                  value={invoiceFilters.invoiceNumber}
+                  onChange={(e) => setInvoiceFilters({ ...invoiceFilters, invoiceNumber: e.target.value })}
+                />
+              </label>
+            </div>
+
+            <InvoicePrintArea
+              invoiceNumber={invoiceFilters.invoiceNumber}
+              clientName={invoiceFilters.clientName}
+              startDate={invoiceFilters.startDate}
+              endDate={invoiceFilters.endDate}
+              entries={invoiceEntries}
+              totals={invoiceTotals}
+            />
+          </div>
+        </div>
+      )}
+
+      <div className="hidden print:block">
+        <InvoicePrintArea
+          invoiceNumber={invoiceFilters.invoiceNumber}
+          clientName={invoiceFilters.clientName}
+          startDate={invoiceFilters.startDate}
+          endDate={invoiceFilters.endDate}
+          entries={invoiceEntries}
+          totals={invoiceTotals}
+        />
+      </div>
+
       {stopDraft && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4 no-print">
           <div className="w-full max-w-lg rounded-3xl bg-white p-6 shadow-xl">
             <h2 className="mb-1 text-2xl font-bold">Finish Time Entry</h2>
             <p className="mb-4 text-slate-600">
@@ -528,7 +650,7 @@ export default function AnchorTimePhaseOne() {
       )}
 
       {manualOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4 no-print">
           <div className="w-full max-w-lg rounded-3xl bg-white p-6 shadow-xl">
             <h2 className="mb-4 text-2xl font-bold">Manual Time Entry</h2>
             <div className="grid gap-3 md:grid-cols-2">
@@ -586,6 +708,100 @@ export default function AnchorTimePhaseOne() {
           </div>
         </div>
       )}
+    </div>
+  );
+}
+
+function InvoicePrintArea({
+  invoiceNumber,
+  clientName,
+  startDate,
+  endDate,
+  entries,
+  totals,
+}: {
+  invoiceNumber: string;
+  clientName: string;
+  startDate: string;
+  endDate: string;
+  entries: Entry[];
+  totals: { hours: number; amount: number };
+}) {
+  return (
+    <div id="invoice-print-area" className="rounded-2xl border bg-white p-6 text-slate-900">
+      <div className="mb-8 flex flex-col justify-between gap-4 border-b pb-6 md:flex-row">
+        <div>
+          <h1 className="text-3xl font-bold">Invoice</h1>
+          <p className="mt-1 text-slate-600">Anchor Care Consulting</p>
+          <p className="text-slate-600">Generated through AnchorTime</p>
+        </div>
+        <div className="text-left md:text-right">
+          <p><span className="font-semibold">Invoice #:</span> {invoiceNumber}</p>
+          <p><span className="font-semibold">Invoice Date:</span> {todayString()}</p>
+          <p><span className="font-semibold">Client:</span> {clientName}</p>
+          {(startDate || endDate) && (
+            <p><span className="font-semibold">Period:</span> {startDate || "Beginning"} to {endDate || "Today"}</p>
+          )}
+        </div>
+      </div>
+
+      <div className="overflow-x-auto">
+        <table className="w-full text-left text-sm">
+          <thead>
+            <tr className="border-b bg-slate-50 text-slate-600">
+              <th className="p-3">Date</th>
+              <th className="p-3">Client</th>
+              <th className="p-3">Activity</th>
+              <th className="p-3 text-right">Hours</th>
+              <th className="p-3 text-right">Rate</th>
+              <th className="p-3 text-right">Amount</th>
+            </tr>
+          </thead>
+          <tbody>
+            {entries.length === 0 ? (
+              <tr>
+                <td colSpan={6} className="p-6 text-center text-slate-500">No billable entries match this invoice filter.</td>
+              </tr>
+            ) : (
+              entries.map((entry) => (
+                <React.Fragment key={entry.id}>
+                  <tr className="border-b align-top">
+                    <td className="p-3">{entry.date}</td>
+                    <td className="p-3">{entry.clientName}</td>
+                    <td className="p-3">{entry.activity}</td>
+                    <td className="p-3 text-right">{entry.hours.toFixed(2)}</td>
+                    <td className="p-3 text-right">{money(entry.rate)}</td>
+                    <td className="p-3 text-right">{money(entry.amount)}</td>
+                  </tr>
+                  {entry.notes && (
+                    <tr className="border-b bg-slate-50/50">
+                      <td className="p-3 text-slate-500" colSpan={2}>Notes</td>
+                      <td className="p-3 text-slate-700" colSpan={4}>{entry.notes}</td>
+                    </tr>
+                  )}
+                </React.Fragment>
+              ))
+            )}
+          </tbody>
+        </table>
+      </div>
+
+      <div className="mt-8 flex justify-end">
+        <div className="w-full max-w-sm rounded-2xl bg-slate-50 p-5">
+          <div className="flex justify-between border-b py-2">
+            <span className="font-medium">Total Hours</span>
+            <span>{totals.hours.toFixed(2)}</span>
+          </div>
+          <div className="flex justify-between pt-4 text-xl font-bold">
+            <span>Total Due</span>
+            <span>{money(totals.amount)}</span>
+          </div>
+        </div>
+      </div>
+
+      <div className="mt-8 border-t pt-4 text-sm text-slate-500">
+        <p>Thank you. Please remit payment according to the terms in your consulting agreement.</p>
+      </div>
     </div>
   );
 }
