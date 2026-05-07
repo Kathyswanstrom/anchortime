@@ -1,3 +1,4 @@
+
 "use client";
 
 import React, { useEffect, useMemo, useState } from "react";
@@ -103,6 +104,7 @@ export default function AnchorTimePhaseOne() {
     startDate: "",
     endDate: "",
     invoiceNumber: `INV-${todayString().replaceAll("-", "")}`,
+    paymentTerms: "Due upon receipt",
   });
 
   useEffect(() => {
@@ -592,6 +594,15 @@ export default function AnchorTimePhaseOne() {
                   onChange={(e) => setInvoiceFilters({ ...invoiceFilters, invoiceNumber: e.target.value })}
                 />
               </label>
+              <label className="space-y-1 md:col-span-4">
+                <span className="text-sm font-medium text-slate-600">Payment Terms</span>
+                <input
+                  className="w-full rounded-2xl border p-3"
+                  placeholder="Due upon receipt, Net 7, Net 15, Net 30, etc."
+                  value={invoiceFilters.paymentTerms}
+                  onChange={(e) => setInvoiceFilters({ ...invoiceFilters, paymentTerms: e.target.value })}
+                />
+              </label>
             </div>
 
             <InvoicePrintArea
@@ -599,6 +610,7 @@ export default function AnchorTimePhaseOne() {
               clientName={invoiceFilters.clientName}
               startDate={invoiceFilters.startDate}
               endDate={invoiceFilters.endDate}
+              paymentTerms={invoiceFilters.paymentTerms}
               entries={invoiceEntries}
               totals={invoiceTotals}
             />
@@ -717,6 +729,7 @@ function InvoicePrintArea({
   clientName,
   startDate,
   endDate,
+  paymentTerms,
   entries,
   totals,
 }: {
@@ -724,21 +737,32 @@ function InvoicePrintArea({
   clientName: string;
   startDate: string;
   endDate: string;
+  paymentTerms: string;
   entries: Entry[];
   totals: { hours: number; amount: number };
 }) {
   return (
     <div id="invoice-print-area" className="rounded-2xl border bg-white p-6 text-slate-900">
-      <div className="mb-8 flex flex-col justify-between gap-4 border-b pb-6 md:flex-row">
-        <div>
-          <h1 className="text-3xl font-bold">Invoice</h1>
-          <p className="mt-1 text-slate-600">Anchor Care Consulting</p>
-          <p className="text-slate-600">Generated through AnchorTime</p>
+      <div className="mb-8 flex flex-col justify-between gap-6 border-b pb-6 md:flex-row">
+        <div className="flex items-start gap-4">
+          <img
+            src="/anchor-care-logo.png"
+            alt="Anchor Care Consulting logo"
+            className="h-24 w-24 rounded-xl object-contain"
+          />
+          <div>
+            <h1 className="text-3xl font-bold text-slate-900">Invoice</h1>
+            <p className="mt-1 text-lg font-semibold text-slate-800">Anchor Care Consulting</p>
+            <p className="text-slate-600">4565 W. Highway 24</p>
+            <p className="text-slate-600">Florissant, CO 80816</p>
+            <p className="text-slate-600">kathy@anchorcareconsulting.com</p>
+          </div>
         </div>
         <div className="text-left md:text-right">
           <p><span className="font-semibold">Invoice #:</span> {invoiceNumber}</p>
           <p><span className="font-semibold">Invoice Date:</span> {todayString()}</p>
           <p><span className="font-semibold">Client:</span> {clientName}</p>
+          <p><span className="font-semibold">Terms:</span> {paymentTerms || "Due upon receipt"}</p>
           {(startDate || endDate) && (
             <p><span className="font-semibold">Period:</span> {startDate || "Beginning"} to {endDate || "Today"}</p>
           )}
@@ -800,7 +824,8 @@ function InvoicePrintArea({
       </div>
 
       <div className="mt-8 border-t pt-4 text-sm text-slate-500">
-        <p>Thank you. Please remit payment according to the terms in your consulting agreement.</p>
+        <p>Thank you. Payment terms: {paymentTerms || "Due upon receipt"}.</p>
+        <p>Anchor Care Consulting • 4565 W. Highway 24, Florissant, CO 80816 • kathy@anchorcareconsulting.com</p>
       </div>
     </div>
   );
