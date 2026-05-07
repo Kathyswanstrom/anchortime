@@ -1,4 +1,3 @@
-
 "use client";
 
 import React, { useEffect, useMemo, useState } from "react";
@@ -624,6 +623,7 @@ export default function AnchorTimePhaseOne() {
           clientName={invoiceFilters.clientName}
           startDate={invoiceFilters.startDate}
           endDate={invoiceFilters.endDate}
+          paymentTerms={invoiceFilters.paymentTerms}
           entries={invoiceEntries}
           totals={invoiceTotals}
         />
