@@ -90,7 +90,7 @@ function money(value: number) {
 function mapSupabaseEntry(row: any): Entry {
   return {
     id: row.id,
-    date: row.created_at ? row.created_at.slice(0, 10) : todayString(),
+    date: row.entry_date || (row.created_at ? row.created_at.slice(0, 10) : todayString()),
     clientId: row.client_id || "",
     clientName: row.client_name || "Unknown Client",
     activity: row.activity || "",
@@ -374,7 +374,8 @@ export default function AnchorTimeApp() {
     const { data, error } = await supabase
       .from("time_entries")
       .insert([
-        {
+        {	
+	  entry_date: entry.date,
           client_name: entry.clientName,
           activity: entry.activity,
           start_time: startTime,
