@@ -1,4 +1,3 @@
-
 "use client";
 
 import React, { useEffect, useMemo, useState } from "react";
@@ -12,6 +11,7 @@ import {
   FileText,
   Printer,
   UserPlus,
+  Pencil,
 } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -115,6 +115,7 @@ export default function AnchorTimeApp() {
   const [manualOpen, setManualOpen] = useState(false);
   const [invoiceOpen, setInvoiceOpen] = useState(false);
   const [clientManagerOpen, setClientManagerOpen] = useState(false);
+  const [editingEntry, setEditingEntry] = useState<Entry | null>(null);
   const [entries, setEntries] = useState<Entry[]>([]);
   const [saveError, setSaveError] = useState("");
 
@@ -467,6 +468,44 @@ export default function AnchorTimeApp() {
     setManualOpen(false);
   }
 
+  async function saveEditedEntry() {
+    if (!editingEntry) return;
+
+    setSaveError("");
+
+    const updatedAmount = editingEntry.billable
+      ? Number(editingEntry.hours) * Number(editingEntry.rate)
+      : 0;
+
+    const { error } = await supabase
+      .from("time_entries")
+      .update({
+        client_name: editingEntry.clientName,
+        activity: editingEntry.activity,
+        hours: editingEntry.hours,
+        notes: editingEntry.notes,
+        billable: editingEntry.billable,
+        amount: updatedAmount,
+      })
+      .eq("id", editingEntry.id);
+
+    if (error) {
+      console.error(error);
+      setSaveError(error.message);
+      return;
+    }
+
+    setEntries((prev) =>
+      prev.map((entry) =>
+        entry.id === editingEntry.id
+          ? { ...editingEntry, amount: updatedAmount }
+          : entry
+      )
+    );
+
+    setEditingEntry(null);
+  }
+
   async function deleteEntry(entryId: string) {
     setSaveError("");
 
@@ -515,6 +554,7 @@ export default function AnchorTimeApp() {
   function printInvoice() {
     window.print();
   }
+
   return (
     <div className="min-h-screen bg-slate-50 p-4 md:p-8 text-slate-900">
       <style>{`
@@ -773,9 +813,22 @@ export default function AnchorTimeApp() {
                         <td>{money(entry.amount)}</td>
                         <td className="max-w-sm">{entry.notes}</td>
                         <td>
-                          <button onClick={() => deleteEntry(entry.id)} className="text-slate-400 hover:text-red-600">
-                            <Trash2 className="h-4 w-4" />
-                          </button>
+                          <div className="flex justify-end gap-2">
+                            <button
+                              onClick={() => setEditingEntry(entry)}
+                              className="text-slate-400 hover:text-blue-600"
+                              title="Edit entry"
+                            >
+                              <Pencil className="h-4 w-4" />
+                            </button>
+                            <button
+                              onClick={() => deleteEntry(entry.id)}
+                              className="text-slate-400 hover:text-red-600"
+                              title="Delete entry"
+                            >
+                              <Trash2 className="h-4 w-4" />
+                            </button>
+                          </div>
                         </td>
                       </tr>
                     ))
@@ -786,6 +839,100 @@ export default function AnchorTimeApp() {
           </CardContent>
         </Card>
       </div>
+
+      {editingEntry && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4 no-print">
+          <div className="w-full max-w-lg rounded-3xl bg-white p-6 shadow-xl">
+            <h2 className="mb-4 text-2xl font-bold">Edit Time Entry</h2>
+
+            <label className="mb-3 block space-y-1">
+              <span className="text-sm font-medium text-slate-600">Client</span>
+              <input
+                className="w-full rounded-2xl border p-3"
+                value={editingEntry.clientName}
+                onChange={(e) =>
+                  setEditingEntry({ ...editingEntry, clientName: e.target.value })
+                }
+              />
+            </label>
+
+            <label className="mb-3 block space-y-1">
+              <span className="text-sm font-medium text-slate-600">Activity</span>
+              <input
+                className="w-full rounded-2xl border p-3"
+                value={editingEntry.activity}
+                onChange={(e) =>
+                  setEditingEntry({ ...editingEntry, activity: e.target.value })
+                }
+              />
+            </label>
+
+            <div className="mb-3 grid gap-3 md:grid-cols-2">
+              <label className="space-y-1">
+                <span className="text-sm font-medium text-slate-600">Hours</span>
+                <input
+                  type="number"
+                  step="0.1"
+                  className="w-full rounded-2xl border p-3"
+                  value={editingEntry.hours}
+                  onChange={(e) =>
+                    setEditingEntry({ ...editingEntry, hours: Number(e.target.value) })
+                  }
+                />
+              </label>
+
+              <label className="space-y-1">
+                <span className="text-sm font-medium text-slate-600">Rate</span>
+                <input
+                  type="number"
+                  step="1"
+                  className="w-full rounded-2xl border p-3"
+                  value={editingEntry.rate}
+                  onChange={(e) =>
+                    setEditingEntry({ ...editingEntry, rate: Number(e.target.value) })
+                  }
+                />
+              </label>
+            </div>
+
+            <label className="mb-3 block space-y-1">
+              <span className="text-sm font-medium text-slate-600">Notes</span>
+              <textarea
+                className="h-24 w-full rounded-2xl border p-3"
+                value={editingEntry.notes}
+                onChange={(e) =>
+                  setEditingEntry({ ...editingEntry, notes: e.target.value })
+                }
+              />
+            </label>
+
+            <label className="mb-4 flex items-center gap-2 text-sm">
+              <input
+                type="checkbox"
+                checked={editingEntry.billable}
+                onChange={(e) =>
+                  setEditingEntry({ ...editingEntry, billable: e.target.checked })
+                }
+              />
+              Billable
+            </label>
+
+            <div className="flex justify-end gap-2">
+              <Button
+                variant="outline"
+                onClick={() => setEditingEntry(null)}
+                className="rounded-2xl"
+              >
+                Cancel
+              </Button>
+
+              <Button onClick={saveEditedEntry} className="rounded-2xl">
+                Save Changes
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {clientManagerOpen && (
         <div className="fixed inset-0 z-50 overflow-y-auto bg-black/40 p-4 no-print">
