@@ -135,12 +135,13 @@ export default function AnchorTimeApp() {
   });
 
   const [invoiceFilters, setInvoiceFilters] = useState({
-    clientName: "All Clients",
-    startDate: "",
-    endDate: "",
-    invoiceNumber: `INV-${todayString().replaceAll("-", "")}`,
-    paymentTerms: "Due upon receipt",
-  });
+  clientName: "All Clients",
+  startDate: "",
+  endDate: "",
+  invoiceNumber: `INV-${todayString().replaceAll("-", "")}`,
+  paymentTerms: "Due upon receipt",
+  includeNonBillable: false,
+});
 
   useEffect(() => {
     const interval = setInterval(() => setNow(Date.now()), 1000);
