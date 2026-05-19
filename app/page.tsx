@@ -290,8 +290,9 @@ export default function AnchorTimeApp() {
     return { hours, amount };
   }, [entries]);
 
-  const invoiceEntries = useMemo(() => {
-    return entries.filter((entry) => {
+ const invoiceEntries = useMemo(() => {
+  return entries
+    .filter((entry) => {
       const clientMatch =
         invoiceFilters.clientName === "All Clients" ||
         entry.clientName === invoiceFilters.clientName;
@@ -300,8 +301,9 @@ export default function AnchorTimeApp() {
       const endMatch = !invoiceFilters.endDate || entry.date <= invoiceFilters.endDate;
 
       return clientMatch && startMatch && endMatch && entry.billable;
-    });
-  }, [entries, invoiceFilters]);
+    })
+    .sort((a, b) => a.date.localeCompare(b.date));
+}, [entries, invoiceFilters]);
 
   const invoiceTotals = useMemo(() => {
     const hours = invoiceEntries.reduce((sum, e) => sum + Number(e.hours || 0), 0);
